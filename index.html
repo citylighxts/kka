@@ -310,8 +310,14 @@ function renderBoard(player, boxes, visited = new Set()) {
             cell.classList.add("cell");
 
             if (gameState.board[x][y] === '#') {
-                cell.classList.add("wall");
-                cell.textContent = '■'; // Wall representation
+                // cell.classList.add("wall");
+                // cell.textContent = '■';
+                const wallImage = document.createElement("img");
+                wallImage.src = "wall.png"; // Path to your wall image
+                wallImage.alt = "Wall";
+                wallImage.style.width = "50px"; // Match cell size
+                wallImage.style.height = "50px"; // Match cell size
+                cell.appendChild(wallImage);
             } else {
                 cell.classList.add("floor");
 
@@ -322,7 +328,7 @@ function renderBoard(player, boxes, visited = new Set()) {
 
                 if (gameState.targets.some(t => t.x === x && t.y === y)) {
                     cell.classList.add("target");
-                    cell.textContent = '◎'; // Target representation
+                    // cell.textContent = '◎';
                 }
 
                 if (boxes.some(b => b.x === x && b.y === y)) {
