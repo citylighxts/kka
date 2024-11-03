@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sokoban A* Solver</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+        }
+
+        h1 {
+            color: #3498db;
+            margin-bottom: 20px;
+        }
+
+        #game-container {
+            display: grid;
+            gap: 2px;
+            background-color: #34495e;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .cell {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.8em;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .wall { 
+            background-color: #7f8c8d;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+        .floor { background-color: #95a5a6; }
+        .player { 
+            background-color: #e74c3c;
+            box-shadow: 0 0 10px rgba(231, 76, 60, 0.5);
+        }
+        .box { 
+            background-color: #f1c40f;
+            color: #2c3e50;
+        }
+        .target { 
+            background-color: #27ae60;
+            box-shadow: inset 0 0 10px rgba(39, 174, 96, 0.5);
+        }
+        .box.on-target {
+            background-color: #e67e22;
+            transform: scale(0.95);
+        }
+
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #3498db;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-family: monospace;
+            background-color: #34495e;
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 400px;
+            text-align: left;
+        }
+
+        .visited {
+            position: relative;
+        }
+
+        .visited::after {
+            content: '·';
+            position: absolute;
+            color: #3498db;
+            opacity: 0.5;
+        }
+
+        .path {
+            position: relative;
+        }
+
+        .path::after {
+            content: '×';
+            position: absolute;
+            color: #e74c3c;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sokoban A* Solver</h1>
+    <div class="controls">
+        <button onclick="solve()" id="solveBtn">Solve with A*</button>
+        <button onclick="resetLevel()" id="resetBtn">Reset Level</button>
+    </div>
+    <div id="game-container"></div>
+    <div id="status">Status: Ready to solve</div>
+
+    <script>
+        // Game state
+        let gameState = {
+            board: [
+                "#####",
+                "#P  #",
+                "# B #",
+                "#  T#",
+                "#####"
+            ],
+            player: { x: 1, y: 1 },
+            boxes: [{ x: 2, y: 2 }],
+            targets: [{ x: 3, y: 3 }],
+            isAnimating: false
+        };
+
+        // Priority Queue implementation for A*
+        class PriorityQueue {
+            constructor() {
+                this.values = [];
+            }
+
+            enqueue(element, priority) {
+                this.values.push({ element, priority });
+                this.sort();
+            }
+
+            dequeue() {
+                return this.values.shift();
+            }
+
+            sort() {
+                this.values.sort((a, b) => a.priority - b.priority);
+            }
+        }
+
+        // State management
+        function getStateString(player, boxes) {
+            return `${player.x},${player.y}|${boxes.map(b => `${b.x},${b.y}`).sort().join('|')}`;
+        }
+
+        // Manhattan distance
+        function manhattanDistance(pos1, pos2) {
+            return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y);
+        }
+
+        // Heuristic function for A*
+        function calculateHeuristic(boxes, targets) {
+            let totalDistance = 0;
+            for (let i = 0; i < boxes.length; i++) {
+                let minDistance = Infinity;
+                for (let j = 0; j < targets.length; j++) {
+                    const distance = manhattanDistance(boxes[i], targets[j]);
+                    minDistance = Math.min(minDistance, distance);
+                }
+                totalDistance += minDistance;
+            }
+            return totalDistance;
+        }
+
+        // Adjusted A* algorithm to find the solution
+async function findPath() {
+    const startState = {
+        player: { ...gameState.player },
+        boxes: gameState.boxes.map(box => ({ ...box })),
+        path: [],
+        cost: 0
+    };
+
+    const queue = new PriorityQueue();
+    const visited = new Set();
+
+    queue.enqueue(startState, 0);
+
+    while (queue.values.length > 0) {
+        const current = queue.dequeue().element;
+        const stateString = getStateString(current.player, current.boxes);
+
+        if (visited.has(stateString)) continue;
+        visited.add(stateString);
+
+        // Visualization of visited states
+        await new Promise(resolve => setTimeout(resolve, 100));
+        renderBoard(current.player, current.boxes, visited);
+
+        // Check if current state is goal state
+        if (isGoalState(current.boxes)) {
+            return current.path;
+        }
+
+        const moves = getValidMoves(current.player, current.boxes);
+
+        for (const move of moves) {
+            const newPlayer = {
+                x: current.player.x + move.dx,
+                y: current.player.y + move.dy
+            };
+
+            const newBoxes = current.boxes.map(box => {
+                if (box.x === newPlayer.x && box.y === newPlayer.y) {
+                    return {
+                        x: box.x + move.dx,
+                        y: box.y + move.dy
+                    };
+                }
+                return { ...box };
+            });
+
+            const newPath = [...current.path, move];
+            const newCost = newPath.length;
+            const heuristic = calculateHeuristic(newBoxes, gameState.targets);
+
+            queue.enqueue(
+                { player: newPlayer, boxes: newBoxes, path: newPath, cost: newCost },
+                newCost + heuristic
+            );
+        }
+    }
+
+    return null;
+}
+
+// Check if current state is goal state
+function isGoalState(boxes) {
+    return gameState.targets.every(target =>
+        boxes.some(box => box.x === target.x && box.y === target.y)
+    );
+}
+
+// Check if move is valid
+function isValidMove(x, y, boxes) {
+    if (gameState.board[x][y] === '#') return false; // Wall check
+    if (boxes.some(box => box.x === x && box.y === y)) {
+        const nextX = x + (x - gameState.player.x);
+        const nextY = y + (y - gameState.player.y);
+        return gameState.board[nextX] && gameState.board[nextX][nextY] !== '#' && !boxes.some(b => b.x === nextX && b.y === nextY);
+    }
+    return true;
+}
+
+// Get valid moves for current state
+function getValidMoves(player, boxes) {
+    const moves = [
+        { dx: -1, dy: 0, dir: 'up' },
+        { dx: 1, dy: 0, dir: 'down' },
+        { dx: 0, dy: -1, dir: 'left' },
+        { dx: 0, dy: 1, dir: 'right' }
+    ];
+
+    return moves.filter(move => {
+        const newX = player.x + move.dx;
+        const newY = player.y + move.dy;
+
+        if (!isValidMove(newX, newY, boxes)) return false;
+
+        const boxIndex = boxes.findIndex(box => box.x === newX && box.y === newY);
+        if (boxIndex === -1) return true;
+
+        const newBoxX = newX + move.dx;
+        const newBoxY = newY + move.dy;
+
+        return isValidMove(newBoxX, newBoxY, boxes.filter((_, i) => i !== boxIndex));
+    });
+}
+
+
+// Render the game board
+function renderBoard(player, boxes, visited = new Set()) {
+    const container = document.getElementById("game-container");
+    container.innerHTML = "";
+    container.style.gridTemplateColumns = `repeat(${gameState.board[0].length}, 50px)`;
+
+    for (let x = 0; x < gameState.board.length; x++) {
+        for (let y = 0; y < gameState.board[x].length; y++) {
+            const cell = document.createElement("div");
+            cell.classList.add("cell");
+
+            if (gameState.board[x][y] === '#') {
+                cell.classList.add("wall");
+                cell.textContent = '■'; // Wall representation
+            } else {
+                cell.classList.add("floor");
+
+                // Add visited state visualization
+                if (visited.has(`${x},${y}`)) {
+                    cell.classList.add("visited");
+                }
+
+                if (gameState.targets.some(t => t.x === x && t.y === y)) {
+                    cell.classList.add("target");
+                    cell.textContent = '◎'; // Target representation
+                }
+
+                if (boxes.some(b => b.x === x && b.y === y)) {
+                    // Use image for the box
+                    const boxImage = document.createElement("img");
+                    boxImage.src = "box.png"; // Path to your box image
+                    boxImage.alt = "Box";
+                    boxImage.style.width = "50px"; // Match cell size
+                    boxImage.style.height = "50px"; // Match cell size
+                    cell.appendChild(boxImage);
+                }
+
+                if (player.x === x && player.y === y) {
+                    // Use image for the player
+                    const playerImage = document.createElement("img");
+                    playerImage.src = "player.png"; // Path to your player image
+                    playerImage.alt = "Player";
+                    playerImage.style.width = "50px"; // Match cell size
+                    playerImage.style.height = "50px"; // Match cell size
+                    cell.appendChild(playerImage);
+                }
+            }
+
+            container.appendChild(cell);
+        }
+    }
+}
+
+
+
+        // Execute move with animation
+        async function executeMove(move, player, boxes) {
+            const newPlayer = {
+                x: player.x + move.dx,
+                y: player.y + move.dy
+            };
+
+            const newBoxes = boxes.map(box => {
+                if (box.x === newPlayer.x && box.y === newPlayer.y) {
+                    return {
+                        x: box.x + move.dx,
+                        y: box.y + move.dy
+                    };
+                }
+                return { ...box };
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 300));
+            renderBoard(newPlayer, newBoxes);
+
+            return { player: newPlayer, boxes: newBoxes };
+        }
+
+        // Solve the puzzle
+        async function solve() {
+            if (gameState.isAnimating) return;
+            
+            const solveBtn = document.getElementById('solveBtn');
+            const resetBtn = document.getElementById('resetBtn');
+            const statusDiv = document.getElementById('status');
+            
+            solveBtn.disabled = true;
+            resetBtn.disabled = true;
+            gameState.isAnimating = true;
+            statusDiv.textContent = 'Status: Solving...';
+
+            try {
+                const solution = await findPath();
+                
+                if (solution) {
+                    statusDiv.textContent = 'Status: Solution found! Animating...';
+                    
+                    let currentState = {
+                        player: { ...gameState.player },
+                        boxes: gameState.boxes.map(box => ({ ...box }))
+                    };
+
+                    for (const move of solution) {
+                        currentState = await executeMove(move, currentState.player, currentState.boxes);
+                    }
+
+                    statusDiv.textContent = 'Status: Solution complete!';
+                } else {
+                    statusDiv.textContent = 'Status: No solution found!';
+                }
+            } catch (error) {
+                statusDiv.textContent = 'Status: Error occurred during solving';
+                console.error(error);
+            }
+
+            gameState.isAnimating = false;
+            solveBtn.disabled = false;
+            resetBtn.disabled = false;
+        }
+
+        // Reset the level
+        function resetLevel() {
+            if (gameState.isAnimating) return;
+            
+            gameState.player = { x: 1, y: 1 };
+            gameState.boxes = [{ x: 2, y: 2 }];
+            gameState.isAnimating = false;
+            
+            document.getElementById('status').textContent = 'Status: Ready to solve';
+            document.getElementById('solveBtn').disabled = false;
+            
+            renderBoard(gameState.player, gameState.boxes);
+        }
+
+        // Initialize the game
+        renderBoard(gameState.player, gameState.boxes);
+    </script>
+</body>
+</html>
